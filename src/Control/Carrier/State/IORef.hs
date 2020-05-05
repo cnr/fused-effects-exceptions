@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, MultiParamTypeClasses, RankNTypes, TypeOperators, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances, GADTs, GeneralizedNewtypeDeriving, MultiParamTypeClasses, RankNTypes, TypeOperators, UndecidableInstances #-}
 
 {- | A carrier for the 'State' effect. It uses an 'IORef' internally to handle its state, and thus is safe to use with "Control.Carrier.Resource". Underlying 'IORef' operations are performed with 'readIORef' and 'writeIORef'.
 
@@ -62,11 +62,14 @@ execState s = fmap fst . runState s
 newtype StateC s m a = StateC { runStateC :: ReaderC (IORef s) m a }
   deriving (Alternative, Applicative, Functor, Monad, Fail.MonadFail, MonadFix, MonadIO, MonadPlus)
 
-instance (MonadIO m, Algebra sig m, Effect sig) => Algebra (State s :+: sig) (StateC s m) where
-  alg (L act) = do
-    ref <- StateC ask
-    case act of
-      Put s k -> liftIO (writeIORef ref s) *> k
-      Get k   -> liftIO (readIORef ref) >>= k
-  alg (R other) = StateC (alg (R (handleCoercible other)))
+instance (MonadIO m, Algebra sig m) => Algebra (State s :+: sig) (StateC s m) where
+  alg hdl sig ctx = StateC $ do
+    case sig of
+      L (Put s) -> do
+        ref <- ask
+        (<$ ctx) <$> liftIO (writeIORef ref s)
+      L Get -> do
+        ref <- ask
+        (<$ ctx) <$> liftIO (readIORef ref)
+      R other -> alg (runStateC . hdl) (R other) ctx
   {-# INLINE alg #-}
